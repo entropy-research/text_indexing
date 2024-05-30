@@ -1,0 +1,108 @@
+{
+  "index_settings": {
+    "docstore_compression": "lz4",
+    "docstore_blocksize": 16384
+  },
+  "segments": [
+    {
+      "segment_id": "59cfd3e7-1ac4-4a26-b258-f9664f1a6962",
+      "max_doc": 31,
+      "deletes": null
+    },
+    {
+      "segment_id": "06479d44-92fb-4e9c-9990-7d16aacfb629",
+      "max_doc": 29,
+      "deletes": null
+    },
+    {
+      "segment_id": "40a2081b-3ef7-4c73-baa9-f69fd9958189",
+      "max_doc": 20,
+      "deletes": null
+    },
+    {
+      "segment_id": "b8c9f471-18a5-47cf-bb7e-ba75298cee66",
+      "max_doc": 10,
+      "deletes": null
+    },
+    {
+      "segment_id": "fc7237d0-5f65-4dcd-803b-591e1ab25d6a",
+      "max_doc": 9,
+      "deletes": null
+    }
+  ],
+  "schema": [
+    {
+      "name": "path",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "position",
+          "fieldnorms": true,
+          "tokenizer": "default"
+        },
+        "stored": true,
+        "fast": true
+      }
+    },
+    {
+      "name": "content",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "position",
+          "fieldnorms": true,
+          "tokenizer": "default"
+        },
+        "stored": true,
+        "fast": false
+      }
+    },
+    {
+      "name": "symbol_locations",
+      "type": "bytes",
+      "options": {
+        "indexed": false,
+        "fieldnorms": false,
+        "fast": false,
+        "stored": true
+      }
+    },
+    {
+      "name": "line_end_indices",
+      "type": "bytes",
+      "options": {
+        "indexed": false,
+        "fieldnorms": false,
+        "fast": false,
+        "stored": true
+      }
+    },
+    {
+      "name": "symbols",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "position",
+          "fieldnorms": true,
+          "tokenizer": "default"
+        },
+        "stored": true,
+        "fast": false
+      }
+    },
+    {
+      "name": "lang",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "position",
+          "fieldnorms": true,
+          "tokenizer": "default"
+        },
+        "stored": true,
+        "fast": true
+      }
+    }
+  ],
+  "opstamp": 104
+}
