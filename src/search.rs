@@ -1,5 +1,7 @@
 use std::path::Path;
+use tantivy::query::FuzzyTermQuery;
 use tantivy::schema::Field;
+use tantivy::Term;
 use tantivy::{Index, IndexReader, collector::TopDocs, query::QueryParser};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -22,6 +24,7 @@ pub struct Searcher {
     reader: IndexReader,
     path_field: Field,
     content_field: Field,
+    content_insensitive_field: Field, // Added field
     line_end_indices_field: Field,
     lang_field: Field, // Added lang field
     symbol_locations_field: Field,
@@ -34,8 +37,9 @@ impl Searcher {
         let schema = build_schema();
         let path_field = schema.get_field("path").unwrap();
         let content_field = schema.get_field("content").unwrap();
+        let content_insensitive_field = schema.get_field("content_insensitive").unwrap(); // Added field
         let line_end_indices_field = schema.get_field("line_end_indices").unwrap();
-        let lang_field = schema.get_field("lang").unwrap(); // Added lang field
+        let lang_field = schema.get_field("lang").unwrap();
         let symbol_locations_field = schema.get_field("symbol_locations").unwrap();
 
         Ok(Self {
@@ -43,23 +47,33 @@ impl Searcher {
             reader,
             path_field,
             content_field,
+            content_insensitive_field,
             line_end_indices_field,
             lang_field,
             symbol_locations_field,
         })
     }
-
+    
     pub fn text_search(&self, query_str: &str) -> Result<Vec<SearchResult>> {
+
+        let case_sensitive = true;
         let searcher = self.reader.searcher();
-        let query_parser = QueryParser::for_index(&self.index, vec![self.content_field]);
-
-        let query = query_parser.parse_query(query_str)?;
+        
+        // Choose the appropriate field and query parser based on case sensitivity
+        let (field, query_str) = if case_sensitive {
+            (self.content_field, query_str.to_string())
+        } else {
+            (self.content_insensitive_field, query_str.to_lowercase())
+        };
+    
+        let query_parser = QueryParser::for_index(&self.index, vec![field]);
+        let query = query_parser.parse_query(&query_str)?;
         let top_docs = searcher.search(&query, &TopDocs::with_limit(10))?;
-
+    
         let mut results = Vec::new();
         for (_score, doc_address) in top_docs {
             let retrieved_doc = searcher.doc(doc_address)?;
-
+    
             let path = match retrieved_doc.get_first(self.path_field) {
                 Some(path_field) => path_field.as_text().unwrap().to_string(),
                 None => {
@@ -67,7 +81,7 @@ impl Searcher {
                     continue;
                 }
             };
-
+    
             let content = match retrieved_doc.get_first(self.content_field) {
                 Some(content_field) => content_field.as_text().unwrap().to_string(),
                 None => {
@@ -75,10 +89,9 @@ impl Searcher {
                     continue;
                 }
             };
-
+    
             let line_end_indices_field = retrieved_doc.get_first(self.line_end_indices_field);
-            println!("Debug: line_end_indices_field - {:?}", line_end_indices_field);
-
+    
             let line_end_indices: Vec<u32> = match line_end_indices_field {
                 Some(field) => {
                     match field.as_bytes() {
@@ -98,15 +111,14 @@ impl Searcher {
                     continue;
                 }
             };
-
-            println!("Debug: Line end indices - {:?}", line_end_indices);
-
-            for (line_number, window) in line_end_indices.windows(2).enumerate() {
+    
+            for (mut line_number, window) in line_end_indices.windows(2).enumerate() {
                 if let [start, end] = *window {
                     let line = &content[start as usize..end as usize];
-
-                    if line.contains(query_str) {
-                        let column = line.find(query_str).unwrap();
+    
+                    if line.contains(&query_str) {
+                        line_number += 2;
+                        let column = line.find(&query_str).unwrap();
                         let context_start = if line_number >= 3 { line_number - 3 } else { 0 };
                         let context_end = usize::min(line_number + 3, line_end_indices.len() - 1);
                         let context: String = line_end_indices[context_start..=context_end]
@@ -118,7 +130,7 @@ impl Searcher {
                             })
                             .collect::<Vec<_>>()
                             .join("\n");
-
+    
                         results.push(SearchResult {
                             path: path.clone(),
                             line_number,
@@ -129,9 +141,10 @@ impl Searcher {
                 }
             }
         }
-
+    
         Ok(results)
     }
+    
 
     pub fn load_all_documents(&self, lang: &str) -> Result<Vec<ContentDocument>> {
         let searcher = self.reader.searcher();
@@ -189,7 +202,45 @@ impl Searcher {
     }
 
 
-    pub fn token_info(&self, lang: &str, relative_path: &str, start_byte: usize, end_byte: usize) -> Result<Vec<FileSymbols>> {
+    pub fn line_word_to_byte_range(&self, content: &str, line_end_indices: &[u32], line_number: usize, word_start_index: usize, word_end_index: usize) -> Result<(usize, usize)> {
+        if line_number == 0 || line_number > line_end_indices.len() {
+            return Err(anyhow::anyhow!("Invalid line number"));
+        }
+    
+        // Calculate the start and end byte indices for the line
+        let start_of_line = if line_number == 1 {
+            0
+        } else {
+            line_end_indices[line_number - 2] as usize + 1
+        };
+    
+        let end_of_line = line_end_indices[line_number - 1] as usize;
+    
+        // Extract the line as a &str
+        let line = &content[start_of_line..end_of_line];
+    
+        // println!("{}", line);
+    
+        // Validate word start and end indices
+        if word_start_index >= word_end_index || word_end_index > line.chars().count() {
+            return Err(anyhow::anyhow!("Invalid word indices"));
+        }
+    
+        // Find the byte index for the start of the word
+        let word_start_byte_index = line.chars().take(word_start_index).map(|c| c.len_utf8()).sum::<usize>();
+    
+        // Find the byte index for the end of the word
+        let word_end_byte_index = line.chars().take(word_end_index).map(|c| c.len_utf8()).sum::<usize>();
+    
+        let start_byte = start_of_line + word_start_byte_index;
+        let end_byte = start_of_line + word_end_byte_index;
+    
+        println!("{:?}", &content[start_byte..end_byte]);
+    
+        Ok((start_byte, end_byte))
+    }
+
+    pub fn token_info(&self, lang: &str, relative_path: &str, line: usize, start_index: usize, end_index: usize) -> Result<Vec<FileSymbols>> {
         let all_docs = self.load_all_documents(lang)?;
         
         // Find the source document based on the provided relative path
@@ -197,23 +248,76 @@ impl Searcher {
             .ok_or(anyhow::anyhow!("Source document not found"))?;
         
         let doc = all_docs.get(source_document_idx).unwrap();
+    
+        // println!("{:?}", doc.content);
+    
+        // Convert line number and indices to byte range
+        let (start_byte, end_byte) = Self::line_word_to_byte_range(self, &doc.content, &doc.line_end_indices, line, start_index, end_index)?;
 
-        println!("{:?}", doc.content);
+        // println!("{}", doc.content[start_byte..end_byte]);
 
         let token = Token {
             relative_path,
             start_byte,
             end_byte,
         };
-
+    
         let context = CodeNavigationContext {
             token,
             all_docs: &all_docs,
             source_document_idx,
             snipper: None, // Provide a snipper if needed for snippet generation
         };
+    
+        let mut data = context.token_info();
 
-        let data = context.token_info();
+        // Adjust line numbers by 1
+        for file_symbols in &mut data {
+            for occurrence in &mut file_symbols.data {
+                occurrence.range.start.line += 1;
+                occurrence.range.end.line += 1;
+            }
+        }
+        
         Ok(data)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Indexes;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_searcher_with_test_files() -> Result<()> {
+        let root_path = Path::new("./test_files");
+        let index_path = Path::new("./test_files/index");
+        
+        // Clean up the index directory if it exists
+        if index_path.exists() {
+            std::fs::remove_dir_all(index_path)?;
+        }
+
+        // Create indexes
+        let buffer_size_per_thread = 60_000_000;
+        let num_threads = 4;
+
+        let indexes = Indexes::new(index_path, buffer_size_per_thread, num_threads).await?;
+        indexes.index(root_path).await?;
+
+        // Create a searcher and perform a search
+        let searcher = Searcher::new(index_path)?;
+        let result = searcher.text_search("indexes")?;
+
+        // Print out the results (or you can write assertions here)
+        for res in result {
+            println!(
+                "File: {}, Line: {}, Column: {}, Context: {}",
+                res.path, res.line_number, res.column, res.context
+            );
+        }
+
+        Ok(())
     }
 }

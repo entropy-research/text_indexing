@@ -174,7 +174,9 @@ impl<'a, 'b> CodeNavigationContext<'a, 'b> {
                 .chain(repo_wide_references)
                 .collect()
         } else if self.is_reference() {
+            
             let local_definitions = self.local_definitions();
+            
             let repo_wide_definitions = local_definitions
                 .is_none()
                 .then(|| self.repo_wide_definitions())
@@ -346,7 +348,6 @@ impl<'a, 'b> CodeNavigationContext<'a, 'b> {
             occurrence.range != scope_graph.get_node(node_idx).unwrap().range()
         });
         data.sort_by_key(|occurrence| occurrence.range.start.byte);
-
         data.is_empty().not().then(|| FileSymbols {
             file: self.token.relative_path.to_owned(),
             data,

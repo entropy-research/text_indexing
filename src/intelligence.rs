@@ -3,6 +3,7 @@ mod namespace;
 mod scope_resolution;
 pub mod code_navigation;
 
+
 pub use {
     language::{Language, MemoizedQuery, TSLanguage, TSLanguageConfig, ALL_LANGUAGES},
     namespace::*,

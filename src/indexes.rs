@@ -89,6 +89,7 @@ impl<T: Indexable> Indexer<T> {
     }
 }
 
+
 pub struct Indexes {
     pub file: Indexer<File>,
     pub write_mutex: Mutex<()>,
