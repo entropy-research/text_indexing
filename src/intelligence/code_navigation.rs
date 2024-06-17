@@ -6,7 +6,7 @@ use crate::{
     content_document::ContentDocument,
     snippet::{Snipper, Snippet},
     text_range::TextRange,
-    intelligence::{TreeSitterFile, NodeKind},
+    intelligence::NodeKind,
 };
 
 #[derive(Debug, Serialize)]

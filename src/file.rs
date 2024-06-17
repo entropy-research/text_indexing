@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tantivy::{schema::Schema, IndexWriter, doc, Term};
 use anyhow::Result;
 use async_trait::async_trait;
@@ -6,7 +6,7 @@ use tokio::fs;
 use tokio::task::spawn_blocking;
 use futures::future::BoxFuture;
 use std::collections::{HashSet, HashMap};
-use crate::{indexes::Indexable, sync_handle::SyncHandle};
+use crate::indexes::Indexable;
 use crate::intelligence::{TreeSitterFile, TSLanguage};
 use crate::symbol::SymbolLocations;
 use crate::schema::build_schema;
@@ -58,20 +58,15 @@ impl File {
 
 #[async_trait]
 impl Indexable for File {
-    async fn index_repository(&self, handle: &SyncHandle, root_path: &Path, writer: &IndexWriter) -> Result<()> {
+    async fn index_repository(&self, root_path: &Path, writer: &IndexWriter) -> Result<()> {
         let existing_docs = load_existing_docs(writer, &self.hash_field, &self.path_field)?;
-        let gitignore = parse_gitignore(root_path).await?;
-
-        // Print all paths in gitignore
-        // println!("Paths in .gitignore:");
-        // for pattern in &patterns {
-        //     println!("{}", pattern);
-        // }
+        let mut gitignore = GlobSetBuilder::new();
 
         traverse_and_index_files(
             root_path, writer, &self.schema, self.path_field, self.content_field,
             self.symbol_locations_field, self.symbols_field, self.line_end_indices_field,
-            self.lang_field, self.hash_field, self.content_insensitive_field, &existing_docs, &gitignore, root_path).await
+            self.lang_field, self.hash_field, self.content_insensitive_field, 
+            &existing_docs, &mut gitignore, root_path).await
     }
 
     fn schema(&self) -> Schema {
@@ -98,21 +93,20 @@ fn load_existing_docs(writer: &IndexWriter, hash_field: &tantivy::schema::Field,
     Ok(existing_docs)
 }
 
-async fn parse_gitignore(repo_path: &Path) -> Result<GlobSet> {
-    let gitignore_path = repo_path.join(".gitignore");
-    let mut builder = GlobSetBuilder::new();
+async fn parse_gitignore(current_path: &Path, builder: &mut GlobSetBuilder) -> Result<()> {
+    let gitignore_path = current_path.join(".gitignore");
 
     if gitignore_path.exists() {
         let contents = tokio::fs::read_to_string(&gitignore_path).await?;
         for line in contents.lines() {
             let trimmed_line = line.trim();
             if !trimmed_line.starts_with('#') && !trimmed_line.is_empty() {
-                let mut absolute_pattern = if trimmed_line.starts_with('/') {
+                let absolute_pattern = if trimmed_line.starts_with('/') {
                     // The pattern is already an absolute path, so we just use it as is
-                    repo_path.join(trimmed_line.trim_start_matches('/'))
+                    current_path.join(trimmed_line.trim_start_matches('/'))
                 } else {
-                    // The pattern is a relative path, so we join it with the repo path
-                    repo_path.join(trimmed_line)
+                    // The pattern is a relative path, so we join it with the current path
+                    current_path.join(trimmed_line)
                 };
                 let pattern = absolute_pattern.to_string_lossy().replace("\\", "/");
                 // println!("Adding to gitignore: {}", pattern);
@@ -121,8 +115,9 @@ async fn parse_gitignore(repo_path: &Path) -> Result<GlobSet> {
         }
     }
 
-    Ok(builder.build()?)
+    Ok(())
 }
+
 
 fn traverse_and_index_files<'a>(
     path: &'a Path,
@@ -137,10 +132,16 @@ fn traverse_and_index_files<'a>(
     hash_field: tantivy::schema::Field,
     content_insensitive_field: tantivy::schema::Field,  // New field
     existing_docs: &'a HashMap<String, String>,
-    gitignore: &'a GlobSet,
+    gitignore: &'a mut GlobSetBuilder,
     root_path: &'a Path,
 ) -> BoxFuture<'a, Result<()>> {
     Box::pin(async move {
+        // Parse .gitignore in the current directory and update the builder
+        parse_gitignore(path, gitignore).await?;
+
+        // Build the GlobSet from the builder
+        let globset = gitignore.build()?;
+
         let mut entries = fs::read_dir(path).await?;
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
@@ -150,7 +151,7 @@ fn traverse_and_index_files<'a>(
             let absolute_path_str = absolute_path.to_string_lossy().replace("\\", "/");
 
             // Skip paths that match .gitignore patterns
-            if gitignore.is_match(&absolute_path_str) {
+            if globset.is_match(&absolute_path_str) {
                 continue;
             }
 
@@ -220,15 +221,10 @@ fn traverse_and_index_files<'a>(
                 let last_char_byte_index = content_str.chars().map(|c| c.len_utf8()).sum::<usize>();
                 line_end_indices.extend_from_slice(&u32::to_le_bytes(last_char_byte_index as u32));
 
-                
-
                 // Convert content to lower case for case-insensitive search
                 let content_insensitive = content_str.to_lowercase();
-                // println!("{}", content_insensitive);
 
                 // println!("{}", absolute_path_str);
-
-                
 
                 let doc = tantivy::doc!(
                     path_field => path_str,

@@ -1746,6 +1746,7 @@ dependencies = [
  "regex-syntax 0.6.29",
  "select",
  "serde",
+ "serde_json",
  "serde_yaml",
  "sha2",
  "smallvec",

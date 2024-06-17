@@ -3,11 +3,11 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use tantivy::{schema::Schema, Index, IndexReader, IndexWriter};
 use tokio::sync::Mutex;
-use crate::{sync_handle::SyncHandle, file::File};
+use crate::file::File;
 
 #[async_trait]
 pub trait Indexable: Send + Sync {
-    async fn index_repository(&self, handle: &SyncHandle, root_path: &Path, writer: &IndexWriter) -> Result<()>;
+    async fn index_repository(&self, root_path: &Path, writer: &IndexWriter) -> Result<()>;
     fn schema(&self) -> Schema;
 }
 
@@ -18,8 +18,8 @@ pub struct IndexWriteHandle<'a> {
 }
 
 impl<'a> IndexWriteHandle<'a> {
-    pub async fn index(&self, handle: &SyncHandle, root_path: &Path) -> Result<()> {
-        self.source.index_repository(handle, root_path, &self.writer).await
+    pub async fn index(&self, root_path: &Path) -> Result<()> {
+        self.source.index_repository(root_path, &self.writer).await
     }
 
     pub fn commit(&mut self) -> Result<()> {
@@ -105,9 +105,8 @@ impl Indexes {
 
     pub async fn index(&self, root_path: &Path) -> Result<()> {
         let _write_lock = self.write_mutex.lock().await;
-        let handle = SyncHandle::default();
         let mut writer = self.file.write_handle()?;
-        writer.index(&handle, root_path).await?;
+        writer.index( root_path).await?;
         writer.commit()?;
         Ok(())
     }

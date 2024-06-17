@@ -79,6 +79,7 @@ zstd = "=0.12.4"
 zstd-safe = "=6.0.6"
 
 zstd-sys = "=2.0.9+zstd.1.5.5"
+serde_json = "1.0.117"
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"
